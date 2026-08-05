@@ -88,3 +88,35 @@ Keepalives (`ServerAliveInterval=15`) detect a dead connection within about
   blip after hours of work retries quickly.
 
 Pass `-n` to disable reconnecting entirely.
+
+## Compared to mosh
+
+[mosh](https://mosh.org/) solves an overlapping problem at a different layer:
+it replaces the SSH transport with its own UDP protocol, while ssh-workspace
+keeps plain SSH and puts session persistence on the server.
+
+Where ssh-workspace wins:
+
+- **No dedicated ports.** Works over TCP port 22 like any SSH connection —
+  through bastions, `ProxyJump`, and strict firewalls. mosh needs UDP ports
+  60000–61000 open inbound, which locked-down environments rarely allow.
+- **Minimal server requirements.** tmux or GNU Screen is preinstalled or one
+  package away on nearly any host; `mosh-server` usually isn't.
+- **The session outlives the client.** State lives in the multiplexer on the
+  server, so it survives a client reboot — and you can reattach from a
+  different machine entirely. A mosh session belongs to one client and cannot
+  be reattached; that's why mosh is typically paired with tmux anyway.
+- **Full SSH ecosystem**: port forwarding, agent forwarding, `~/.ssh/config`,
+  `ControlMaster`. mosh has none of these, and no native scrollback.
+
+Where mosh wins:
+
+- **Seamless roaming.** An IP change or laptop sleep is invisible — no drop,
+  no reconnect. ssh-workspace detects a dead connection in ~30 seconds and
+  visibly reconnects.
+- **Latency masking.** Predictive local echo makes typing feel instant on
+  high-latency links; SSH round-trips every keystroke.
+
+If you work on flaky high-latency links and control the server, mosh + tmux
+is a fine stack. If you want persistence with nothing but sshd and a
+multiplexer on the remote end, that's what this tool is for.
