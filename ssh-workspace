@@ -10,9 +10,11 @@ identity=""
 term_type="xterm-256color"
 reconnect=1
 mode="auto"
+session_given=0
 
+# -tt is added only for the attach command; the session listing runs
+# without a pseudo-terminal so its output stays clean.
 ssh_args=(
-    -tt
     -o ServerAliveInterval=15
     -o ServerAliveCountMax=2
     -o ConnectTimeout=10
@@ -25,9 +27,12 @@ Usage:
   $program [options] HOST
   $program [options] USER@HOST
 
+Without -s, existing workspaces on the host are listed so you can pick
+one by number or type a name; non-interactive runs use "workspace".
+
 Options:
   -u USER       SSH username
-  -s SESSION    Session name (default: workspace)
+  -s SESSION    Session name; skips the interactive picker
   -m MODE       Multiplexer: auto, tmux, or screen (default: auto —
                 use tmux if the remote host has it, else GNU Screen)
   -p PORT       SSH port (default: SSH config or 22)
@@ -55,7 +60,10 @@ die() {
 while getopts ":u:s:m:p:i:o:e:nh" option; do
     case "$option" in
         u) username="$OPTARG" ;;
-        s) session="$OPTARG" ;;
+        s)
+            session="$OPTARG"
+            session_given=1
+            ;;
         m) mode="$OPTARG" ;;
         p) port="$OPTARG" ;;
         i) identity="$OPTARG" ;;
@@ -145,6 +153,104 @@ case "$mode" in
         ;;
 esac
 
+# List sessions on the remote host and let the user pick one by number
+# or type a name. Any failure (connection error, no multiplexer) falls
+# through silently; the attach loop reports errors properly.
+pick_session() {
+    local list_command list_output mux line reply candidate count i
+    local -a names states
+
+    list_command="
+if $try_tmux && command -v tmux >/dev/null 2>&1; then
+    printf 'tmux\n'
+    tmux list-sessions -F '#{?session_attached,attached,detached} #S' 2>/dev/null
+    exit 0
+fi
+
+if $try_screen && command -v screen >/dev/null 2>&1; then
+    printf 'screen\n'
+    screen -ls 2>/dev/null | awk '/^[ \t]+[0-9]+\./ {
+        name = \$1
+        sub(/^[0-9]+\./, \"\", name)
+        print (index(\$0, \"Attached\") ? \"attached\" : \"detached\") \" \" name
+    }'
+    exit 0
+fi
+
+exit 127
+"
+
+    list_output=$(ssh "${ssh_args[@]}" "$target" "$list_command") || return 0
+
+    mux=""
+    names=()
+    states=()
+    while IFS= read -r line; do
+        if [[ -z "$mux" ]]; then
+            case "$line" in
+                tmux|screen) mux="$line" ;;
+            esac
+            continue
+        fi
+        [[ "$line" == *" "* ]] || continue
+        states+=("${line%% *}")
+        names+=("${line#* }")
+    done <<< "$list_output"
+
+    [[ -n "$mux" ]] || return 0
+
+    count=${#names[@]}
+
+    if [[ "$count" -eq 0 ]]; then
+        printf 'No existing workspaces on %s (%s).\n' "$target" "$mux"
+        printf 'New session name [%s]: ' "$session"
+    else
+        printf 'Workspaces on %s (%s):\n' "$target" "$mux"
+        for ((i = 0; i < count; i++)); do
+            printf '  %d) %s (%s)\n' "$((i + 1))" "${names[i]}" "${states[i]}"
+        done
+        printf 'Select a number, or type a session name [1]: '
+    fi
+
+    while :; do
+        read -r reply || return 0
+
+        if [[ -z "$reply" ]]; then
+            if [[ "$count" -gt 0 ]]; then
+                candidate="${names[0]}"
+            else
+                candidate="$session"
+            fi
+        elif [[ "$reply" != *[!0-9]* && "$count" -gt 0 &&
+                "$reply" -ge 1 && "$reply" -le "$count" ]]; then
+            candidate="${names[reply - 1]}"
+        else
+            candidate="$reply"
+        fi
+
+        case "$candidate" in
+            ""|*[!A-Za-z0-9_.-]*)
+                printf 'Names may contain only letters, numbers, dots, underscores, and hyphens.\n'
+                printf 'Session name: '
+                continue
+                ;;
+        esac
+
+        if [[ "$mux" == tmux && "$candidate" == *.* ]]; then
+            printf 'tmux session names may not contain dots.\n'
+            printf 'Session name: '
+            continue
+        fi
+
+        session="$candidate"
+        return 0
+    done
+}
+
+if [[ "$session_given" -eq 0 && -t 0 && -t 1 ]]; then
+    pick_session
+fi
+
 # tmux: -A attaches if the session exists (else creates it); with -A,
 # -D detaches other clients. screen -D -RR does the same.
 remote_command="
@@ -174,7 +280,7 @@ while :; do
     # allocates the remote pseudo-terminal. The remote command sets it again.
     started=$SECONDS
     env TERM="$term_type" \
-        ssh "${ssh_args[@]}" "$target" "$remote_command"
+        ssh -tt "${ssh_args[@]}" "$target" "$remote_command"
 
     status=$?
     duration=$((SECONDS - started))

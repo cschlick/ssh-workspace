@@ -30,10 +30,24 @@ ssh-workspace [options] HOST
 ssh-workspace [options] USER@HOST
 ```
 
+Run without `-s` and the script lists the workspaces already on the host so
+you can pick one by number — or type a name to create a new one:
+
+```
+Workspaces on picomol (tmux):
+  1) workspace (attached)
+  2) build (detached)
+  3) claude (detached)
+Select a number, or type a session name [1]:
+```
+
+Passing `-s NAME` skips the picker; non-interactive runs (no terminal) use
+the default name `workspace`.
+
 | Option | Description |
 | ------ | ----------- |
 | `-u USER` | SSH username |
-| `-s SESSION` | Session name (default: `workspace`) |
+| `-s SESSION` | Session name; skips the interactive picker |
 | `-m MODE` | Multiplexer: `auto`, `tmux`, or `screen` (default: `auto` — tmux if available, else Screen) |
 | `-p PORT` | SSH port (default: SSH config or 22) |
 | `-i FILE` | SSH identity file |
