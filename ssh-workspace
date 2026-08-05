@@ -10,6 +10,7 @@ identity=""
 term_type="xterm-256color"
 reconnect=1
 mode="auto"
+start_command=""
 session_given=0
 list_only=0
 resuming=0
@@ -50,6 +51,7 @@ save_state() {
         printf 'term=%s\n' "$term_type"
         [[ -z "$port" ]] || printf 'port=%s\n' "$port"
         [[ -z "$identity" ]] || printf 'identity=%s\n' "$identity"
+        [[ -z "$start_command" ]] || printf 'cmd=%s\n' "$start_command"
         for ((i = 1; i < ${#extra_opts[@]}; i += 2)); do
             printf 'opt=%s\n' "${extra_opts[i]}"
         done
@@ -85,6 +87,9 @@ load_state() {
             identity)
                 [[ -n "$identity" ]] || identity="$value"
                 ;;
+            cmd)
+                [[ -n "$start_command" ]] || start_command="$value"
+                ;;
             opt) saved_opts+=(-o "$value") ;;
         esac
     done < "$state_file"
@@ -116,6 +121,9 @@ Options:
   -i FILE       SSH identity file
   -o OPTION     Additional SSH option; may be repeated
   -e TERM       Terminal type (default: xterm-256color)
+  -c COMMAND    Run COMMAND when the session is first created (the
+                session ends when it exits; append '; exec \$SHELL'
+                to drop to a shell afterwards)
   -n            Do not reconnect automatically
   -h            Show this help
 
@@ -134,7 +142,7 @@ die() {
     exit 2
 }
 
-while getopts ":u:s:m:p:i:o:e:lnh" option; do
+while getopts ":u:s:m:p:i:o:e:c:lnh" option; do
     case "$option" in
         u) username="$OPTARG" ;;
         s)
@@ -145,6 +153,7 @@ while getopts ":u:s:m:p:i:o:e:lnh" option; do
         p) port="$OPTARG" ;;
         i) identity="$OPTARG" ;;
         o) extra_opts+=(-o "$OPTARG") ;;
+        c) start_command="$OPTARG" ;;
         l) list_only=1 ;;
         e) term_type="$OPTARG" ;;
         n) reconnect=0 ;;
@@ -199,6 +208,12 @@ esac
 # tmux reserves dots in session names for its window.pane target syntax.
 if [[ "$mode" != screen && "$session" == *.* ]]; then
     die "session names with dots only work with -m screen"
+fi
+
+# printf %q escapes control characters in a bash-only syntax that the
+# remote shell may not understand; everything else it escapes portably.
+if [[ "$start_command" == *[$'\n\t']* ]]; then
+    die "-c command may not contain newlines or tabs"
 fi
 
 case "$term_type" in
@@ -266,6 +281,7 @@ exit 127
 "
 
 list_sessions() {
+    # shellcheck disable=SC2029  # client-side expansion is intentional
     ssh ${extra_opts[@]+"${extra_opts[@]}"} "${ssh_args[@]}" \
         "$target" "$list_command"
 }
@@ -381,15 +397,25 @@ if [[ "$session_given" -eq 0 && "$resuming" -eq 0 && -t 0 && -t 1 ]]; then
     pick_session
 fi
 
+# The startup command runs only when the session is created; both
+# multiplexers ignore it when attaching to an existing session.
+start_tmux=""
+start_screen=""
+if [[ -n "$start_command" ]]; then
+    start_quoted=$(printf '%q' "$start_command")
+    start_tmux=" $start_quoted"
+    start_screen=" sh -c $start_quoted"
+fi
+
 # tmux: -A attaches if the session exists (else creates it); with -A,
 # -D detaches other clients. screen -D -RR does the same.
 remote_command="
 if $try_tmux && command -v tmux >/dev/null 2>&1; then
-    exec env TERM=$term_type tmux new-session -A -D -s $session
+    exec env TERM=$term_type tmux new-session -A -D -s $session$start_tmux
 fi
 
 if $try_screen && command -v screen >/dev/null 2>&1; then
-    exec env TERM=$term_type screen -D -RR -S $session
+    exec env TERM=$term_type screen -D -RR -S $session$start_screen
 fi
 
 printf '%s\n' \
@@ -403,6 +429,11 @@ max_retry_delay=60
 fast_failures=0
 max_fast_failures=3
 
+# Prepended to the remote command on reconnect attempts only: rings the
+# local terminal bell once the connection is re-established, so a
+# backgrounded tab gets a badge when the workspace comes back.
+attach_notice=""
+
 while :; do
     # Label the terminal tab with the workspace.
     [[ ! -t 1 ]] || printf '\033]0;%s\007' "$target:$session"
@@ -414,7 +445,7 @@ while :; do
     started=$SECONDS
     env TERM="$term_type" \
         ssh -tt ${extra_opts[@]+"${extra_opts[@]}"} "${ssh_args[@]}" \
-        "$target" "$remote_command"
+        "$target" "$attach_notice$remote_command"
 
     status=$?
     duration=$((SECONDS - started))
@@ -437,6 +468,9 @@ while :; do
             if [[ "$reconnect" -eq 0 ]]; then
                 exit 255
             fi
+
+            attach_notice="printf '\a' >&2
+"
 
             # A session that stayed up for a while was a real connection
             # that dropped; remember it and restart the retry sequence
@@ -468,7 +502,7 @@ while :; do
             fi
 
             # Retries are exhausted; hand control back to the user.
-            printf 'Press Enter to resume retrying, or Ctrl-C to quit. '
+            printf '\aPress Enter to resume retrying, or Ctrl-C to quit. '
             read -r _ || exit 255
             retry_delay=2
             fast_failures=0

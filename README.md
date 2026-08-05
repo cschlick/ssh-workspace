@@ -1,5 +1,7 @@
 # ssh-workspace
 
+[![CI](https://github.com/cschlick/ssh-workspace/actions/workflows/ci.yml/badge.svg)](https://github.com/cschlick/ssh-workspace/actions/workflows/ci.yml)
+
 SSH into a host and attach to a persistent terminal-multiplexer session in one
 command — [tmux](https://github.com/tmux/tmux) if the remote host has it,
 [GNU Screen](https://www.gnu.org/software/screen/) otherwise. If the connection
@@ -60,6 +62,7 @@ values; failed connection attempts never overwrite the saved workspace.
 | `-i FILE` | SSH identity file |
 | `-o OPTION` | Additional SSH option; may be repeated |
 | `-e TERM` | Terminal type (default: `xterm-256color`) |
+| `-c COMMAND` | Run COMMAND when the session is first created (ignored when attaching to an existing session; the session ends when it exits — append `; exec $SHELL` to drop to a shell afterwards) |
 | `-n` | Do not reconnect automatically |
 | `-h` | Show help |
 
@@ -70,6 +73,8 @@ ssh-workspace picomol                          # attach to "workspace" on picomo
 ssh-workspace root@picomol                     # as root
 ssh-workspace -s claude root@picomol           # separate named session
 ssh-workspace -m screen picomol                # force GNU Screen
+ssh-workspace -l picomol                       # list workspaces, don't attach
+ssh-workspace -s train -c 'cd ~/runs && python train.py' picomol
 ssh-workspace -p 2222 -s admin alice@example.com
 ssh-workspace -o ProxyJump=bastion root@internal-server
 ```
@@ -101,6 +106,24 @@ Keepalives (`ServerAliveInterval=15`) detect a dead connection within about
   blip after hours of work retries quickly.
 
 Pass `-n` to disable reconnecting entirely.
+
+The terminal bell rings when a reconnect succeeds and when retries pause for
+input, so a backgrounded tab gets a badge when your workspace comes back or
+needs attention.
+
+## Shell completion
+
+Completion files for bash and zsh live in [`completions/`](completions/):
+
+```sh
+# bash — add to ~/.bashrc:
+. /path/to/completions/ssh-workspace.bash
+
+# zsh — copy onto your $fpath:
+cp completions/_ssh-workspace /usr/local/share/zsh/site-functions/
+```
+
+Both complete option flags, modes, and host names from `~/.ssh/config`.
 
 ## Compared to mosh
 

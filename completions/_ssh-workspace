@@ -1,0 +1,17 @@
+#compdef ssh-workspace
+# Zsh completion for ssh-workspace.
+# Install: place in a directory on $fpath (e.g. /usr/local/share/zsh/site-functions).
+
+_arguments \
+    '-u+[SSH username]:user:' \
+    '-s+[session name; skips the picker]:session:' \
+    '-m+[multiplexer]:mode:(auto tmux screen)' \
+    '-p+[SSH port]:port:' \
+    '-i+[SSH identity file]:file:_files' \
+    '*-o+[additional SSH option]:option:' \
+    '-e+[terminal type]:term:' \
+    '-c+[command to run when the session is created]:command:' \
+    '-l[list workspaces on the host and exit]' \
+    '-n[do not reconnect automatically]' \
+    '-h[show help]' \
+    '1:host:_hosts'
