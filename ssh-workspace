@@ -125,15 +125,22 @@ fi
 exec env TERM=$term_type screen -D -RR -S $session
 "
 
+retry_delay=2
+max_retry_delay=60
+fast_failures=0
+max_fast_failures=3
+
 while :; do
     printf 'Connecting to %s — Screen session: %s\n' "$target" "$session"
 
     # Setting TERM locally makes SSH advertise xterm-256color when it
     # allocates the remote pseudo-terminal. The remote command sets it again.
+    started=$SECONDS
     env TERM="$term_type" \
         ssh "${ssh_args[@]}" "$target" "$remote_command"
 
     status=$?
+    duration=$((SECONDS - started))
 
     case "$status" in
         0)
@@ -153,8 +160,38 @@ while :; do
                 exit 255
             fi
 
-            printf '\nSSH connection lost. Reconnecting in 2 seconds; press Ctrl-C to stop.\n'
-            sleep 2
+            # A session that stayed up for a while was a real connection
+            # that dropped; restart the retry sequence from scratch.
+            if [[ "$duration" -ge 30 ]]; then
+                retry_delay=2
+                fast_failures=0
+            fi
+
+            # Failing within seconds means auth rejection or connection
+            # refused, not an outage; retrying on a timer won't help.
+            if [[ "$duration" -lt 3 ]]; then
+                fast_failures=$((fast_failures + 1))
+            else
+                fast_failures=0
+            fi
+
+            if [[ "$fast_failures" -ge "$max_fast_failures" ]]; then
+                printf '\nConnection is failing immediately — check credentials, host, and sshd.\n'
+            elif [[ "$retry_delay" -gt "$max_retry_delay" ]]; then
+                printf '\nStill unable to reach %s.\n' "$target"
+            else
+                printf '\nSSH connection lost. Reconnecting in %d seconds; press Ctrl-C to stop.\n' \
+                    "$retry_delay"
+                sleep "$retry_delay"
+                retry_delay=$((retry_delay * 2))
+                continue
+            fi
+
+            # Retries are exhausted; hand control back to the user.
+            printf 'Press Enter to resume retrying, or Ctrl-C to quit. '
+            read -r _ || exit 255
+            retry_delay=2
+            fast_failures=0
             ;;
 
         *)
