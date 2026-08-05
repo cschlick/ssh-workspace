@@ -28,6 +28,7 @@ Requirements: `bash` and `ssh` locally, tmux or GNU Screen on the remote host
 ```
 ssh-workspace [options] HOST
 ssh-workspace [options] USER@HOST
+ssh-workspace                       # reconnect to the last workspace
 ```
 
 Run without `-s` and the script lists the workspaces already on the host so
@@ -44,10 +45,15 @@ Select a number, or type a session name [1]:
 Passing `-s NAME` skips the picker; non-interactive runs (no terminal) use
 the default name `workspace`.
 
+Each connection remembers where it went: run `ssh-workspace` with no host at
+all and it reconnects straight to the last workspace (host, session, port,
+and `-o` options included). Explicit flags override the saved values.
+
 | Option | Description |
 | ------ | ----------- |
 | `-u USER` | SSH username |
 | `-s SESSION` | Session name; skips the interactive picker |
+| `-l` | List workspaces on the host and exit |
 | `-m MODE` | Multiplexer: `auto`, `tmux`, or `screen` (default: `auto` — tmux if available, else Screen) |
 | `-p PORT` | SSH port (default: SSH config or 22) |
 | `-i FILE` | SSH identity file |
@@ -73,6 +79,12 @@ laptop and reattach to the same shell.
 
 Detach with `Ctrl-B d` (tmux) or `Ctrl-A d` (Screen), or exit the remote shell
 to end the session.
+
+Quality-of-life details: the terminal tab is titled `host:session` so multiple
+workspaces are easy to tell apart, and the session listing and attach share
+one SSH connection (`ControlMaster`), so the picker adds no extra auth prompt.
+State (the last-workspace file and control sockets) lives in
+`~/.local/state/ssh-workspace/`.
 
 ## Reconnect behavior
 

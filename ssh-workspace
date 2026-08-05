@@ -11,6 +11,16 @@ term_type="xterm-256color"
 reconnect=1
 mode="auto"
 session_given=0
+list_only=0
+resuming=0
+picked_mux=""
+
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/ssh-workspace"
+state_file="$state_dir/last"
+
+# User-supplied -o options; placed before the defaults on the command
+# line because ssh uses the first value given for each option.
+extra_opts=()
 
 # -tt is added only for the attach command; the session listing runs
 # without a pseudo-terminal so its output stays clean.
@@ -21,11 +31,77 @@ ssh_args=(
     -o ConnectionAttempts=1
 )
 
+# Share one SSH connection between the session listing and the attach,
+# so the picker costs no extra round-trip or auth prompt.
+if mkdir -p "$state_dir" 2>/dev/null && chmod 700 "$state_dir" 2>/dev/null; then
+    ssh_args+=(
+        -o ControlMaster=auto
+        -o "ControlPath=$state_dir/cm-%C"
+        -o ControlPersist=30
+    )
+fi
+
+save_state() {
+    local i
+    {
+        printf 'target=%s\n' "$target"
+        printf 'session=%s\n' "$session"
+        printf 'mode=%s\n' "${picked_mux:-$mode}"
+        printf 'term=%s\n' "$term_type"
+        [[ -z "$port" ]] || printf 'port=%s\n' "$port"
+        [[ -z "$identity" ]] || printf 'identity=%s\n' "$identity"
+        for ((i = 1; i < ${#extra_opts[@]}; i += 2)); do
+            printf 'opt=%s\n' "${extra_opts[i]}"
+        done
+    } > "$state_file" 2>/dev/null || :
+}
+
+# Load the last workspace; explicit command-line options win over
+# saved values.
+load_state() {
+    local key value
+    local -a saved_opts
+
+    saved_target=""
+    saved_opts=()
+
+    [[ -r "$state_file" ]] || return 1
+
+    while IFS='=' read -r key value; do
+        case "$key" in
+            target) saved_target="$value" ;;
+            session)
+                [[ "$session_given" -eq 1 ]] || session="$value"
+                ;;
+            mode)
+                [[ "$mode" != auto ]] || mode="$value"
+                ;;
+            term)
+                [[ "$term_type" != xterm-256color ]] || term_type="$value"
+                ;;
+            port)
+                [[ -n "$port" ]] || port="$value"
+                ;;
+            identity)
+                [[ -n "$identity" ]] || identity="$value"
+                ;;
+            opt) saved_opts+=(-o "$value") ;;
+        esac
+    done < "$state_file"
+
+    [[ -n "$saved_target" ]] || return 1
+
+    if [[ ${#extra_opts[@]} -eq 0 && ${#saved_opts[@]} -gt 0 ]]; then
+        extra_opts=("${saved_opts[@]}")
+    fi
+}
+
 usage() {
     cat <<USAGE
 Usage:
   $program [options] HOST
   $program [options] USER@HOST
+  $program              (no host: reconnect to the last workspace)
 
 Without -s, existing workspaces on the host are listed so you can pick
 one by number or type a name; non-interactive runs use "workspace".
@@ -33,6 +109,7 @@ one by number or type a name; non-interactive runs use "workspace".
 Options:
   -u USER       SSH username
   -s SESSION    Session name; skips the interactive picker
+  -l            List workspaces on HOST and exit
   -m MODE       Multiplexer: auto, tmux, or screen (default: auto —
                 use tmux if the remote host has it, else GNU Screen)
   -p PORT       SSH port (default: SSH config or 22)
@@ -57,7 +134,7 @@ die() {
     exit 2
 }
 
-while getopts ":u:s:m:p:i:o:e:nh" option; do
+while getopts ":u:s:m:p:i:o:e:lnh" option; do
     case "$option" in
         u) username="$OPTARG" ;;
         s)
@@ -67,7 +144,8 @@ while getopts ":u:s:m:p:i:o:e:nh" option; do
         m) mode="$OPTARG" ;;
         p) port="$OPTARG" ;;
         i) identity="$OPTARG" ;;
-        o) ssh_args+=(-o "$OPTARG") ;;
+        o) extra_opts+=(-o "$OPTARG") ;;
+        l) list_only=1 ;;
         e) term_type="$OPTARG" ;;
         n) reconnect=0 ;;
         h)
@@ -85,12 +163,24 @@ done
 
 shift $((OPTIND - 1))
 
-[[ $# -eq 1 ]] || {
-    usage >&2
-    exit 2
-}
-
-host="$1"
+case $# in
+    0)
+        [[ -z "$username" ]] ||
+            die "-u requires a HOST argument"
+        load_state || {
+            usage >&2
+            exit 2
+        }
+        resuming=1
+        ;;
+    1)
+        host="$1"
+        ;;
+    *)
+        usage >&2
+        exit 2
+        ;;
+esac
 
 case "$mode" in
     auto|tmux|screen) ;;
@@ -130,7 +220,9 @@ if [[ -n "$identity" ]]; then
     ssh_args+=(-i "$identity")
 fi
 
-if [[ -n "$username" ]]; then
+if [[ "$resuming" -eq 1 ]]; then
+    target="$saved_target"
+elif [[ -n "$username" ]]; then
     [[ "$host" != *@* ]] ||
         die "do not combine -u USER with USER@HOST"
     target="${username}@${host}"
@@ -153,14 +245,7 @@ case "$mode" in
         ;;
 esac
 
-# List sessions on the remote host and let the user pick one by number
-# or type a name. Any failure (connection error, no multiplexer) falls
-# through silently; the attach loop reports errors properly.
-pick_session() {
-    local list_command list_output mux line reply candidate count i
-    local -a names states
-
-    list_command="
+list_command="
 if $try_tmux && command -v tmux >/dev/null 2>&1; then
     printf 'tmux\n'
     tmux list-sessions -F '#{?session_attached,attached,detached} #S' 2>/dev/null
@@ -180,7 +265,51 @@ fi
 exit 127
 "
 
-    list_output=$(ssh "${ssh_args[@]}" "$target" "$list_command") || return 0
+list_sessions() {
+    ssh ${extra_opts[@]+"${extra_opts[@]}"} "${ssh_args[@]}" \
+        "$target" "$list_command"
+}
+
+if [[ "$list_only" -eq 1 ]]; then
+    list_output=$(list_sessions)
+    status=$?
+    if [[ "$status" -ne 0 ]]; then
+        [[ "$status" -ne 127 ]] ||
+            printf '%s: no terminal multiplexer on %s (mode: %s)\n' \
+                "$program" "$target" "$mode" >&2
+        exit "$status"
+    fi
+
+    mux=""
+    count=0
+    while IFS= read -r line; do
+        if [[ -z "$mux" ]]; then
+            case "$line" in
+                tmux|screen) mux="$line" ;;
+            esac
+            continue
+        fi
+        [[ "$line" == *" "* ]] || continue
+        [[ "$count" -gt 0 ]] ||
+            printf 'Workspaces on %s (%s):\n' "$target" "$mux"
+        printf '  %s (%s)\n' "${line#* }" "${line%% *}"
+        count=$((count + 1))
+    done <<< "$list_output"
+
+    [[ -n "$mux" ]] || die "unexpected listing output from $target"
+    [[ "$count" -gt 0 ]] ||
+        printf 'No workspaces on %s (%s).\n' "$target" "$mux"
+    exit 0
+fi
+
+# List sessions on the remote host and let the user pick one by number
+# or type a name. Any failure (connection error, no multiplexer) falls
+# through silently; the attach loop reports errors properly.
+pick_session() {
+    local list_output mux line reply candidate count i
+    local -a names states
+
+    list_output=$(list_sessions) || return 0
 
     mux=""
     names=()
@@ -198,6 +327,7 @@ exit 127
     done <<< "$list_output"
 
     [[ -n "$mux" ]] || return 0
+    picked_mux="$mux"
 
     count=${#names[@]}
 
@@ -247,9 +377,11 @@ exit 127
     done
 }
 
-if [[ "$session_given" -eq 0 && -t 0 && -t 1 ]]; then
+if [[ "$session_given" -eq 0 && "$resuming" -eq 0 && -t 0 && -t 1 ]]; then
     pick_session
 fi
+
+save_state
 
 # tmux: -A attaches if the session exists (else creates it); with -A,
 # -D detaches other clients. screen -D -RR does the same.
@@ -274,13 +406,17 @@ fast_failures=0
 max_fast_failures=3
 
 while :; do
+    # Label the terminal tab with the workspace.
+    [[ ! -t 1 ]] || printf '\033]0;%s\007' "$target:$session"
+
     printf 'Connecting to %s — session: %s\n' "$target" "$session"
 
     # Setting TERM locally makes SSH advertise xterm-256color when it
     # allocates the remote pseudo-terminal. The remote command sets it again.
     started=$SECONDS
     env TERM="$term_type" \
-        ssh -tt "${ssh_args[@]}" "$target" "$remote_command"
+        ssh -tt ${extra_opts[@]+"${extra_opts[@]}"} "${ssh_args[@]}" \
+        "$target" "$remote_command"
 
     status=$?
     duration=$((SECONDS - started))
