@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+
+set -u
+
+program="${0##*/}"
+username=""
+session="workspace"
+port=""
+identity=""
+term_type="xterm-256color"
+reconnect=1
+
+ssh_args=(
+    -tt
+    -o ServerAliveInterval=15
+    -o ServerAliveCountMax=2
+    -o ConnectTimeout=10
+    -o ConnectionAttempts=1
+)
+
+usage() {
+    cat <<USAGE
+Usage:
+  $program [options] HOST
+  $program [options] USER@HOST
+
+Options:
+  -u USER       SSH username
+  -s SESSION    Screen session name (default: workspace)
+  -p PORT       SSH port (default: SSH config or 22)
+  -i FILE       SSH identity file
+  -o OPTION     Additional SSH option; may be repeated
+  -e TERM       Terminal type (default: xterm-256color)
+  -n            Do not reconnect automatically
+  -h            Show this help
+
+Examples:
+  $program picomol
+  $program root@picomol
+  $program -u root picomol
+  $program -s claude root@picomol
+  $program -p 2222 -s admin alice@example.com
+  $program -o ProxyJump=bastion root@internal-server
+USAGE
+}
+
+die() {
+    printf '%s: %s\n' "$program" "$*" >&2
+    exit 2
+}
+
+while getopts ":u:s:p:i:o:e:nh" option; do
+    case "$option" in
+        u) username="$OPTARG" ;;
+        s) session="$OPTARG" ;;
+        p) port="$OPTARG" ;;
+        i) identity="$OPTARG" ;;
+        o) ssh_args+=(-o "$OPTARG") ;;
+        e) term_type="$OPTARG" ;;
+        n) reconnect=0 ;;
+        h)
+            usage
+            exit 0
+            ;;
+        :)
+            die "option -$OPTARG requires an argument"
+            ;;
+        \?)
+            die "unknown option: -$OPTARG"
+            ;;
+    esac
+done
+
+shift $((OPTIND - 1))
+
+[[ $# -eq 1 ]] || {
+    usage >&2
+    exit 2
+}
+
+host="$1"
+
+# Restrict values embedded in the remote shell command to safe characters.
+case "$session" in
+    ""|*[!A-Za-z0-9_.-]*)
+        die "session name may contain only letters, numbers, dots, underscores, and hyphens"
+        ;;
+esac
+
+case "$term_type" in
+    ""|*[!A-Za-z0-9_.+-]*)
+        die "invalid terminal type"
+        ;;
+esac
+
+if [[ -n "$port" ]]; then
+    case "$port" in
+        *[!0-9]*|"")
+            die "port must be numeric"
+            ;;
+    esac
+    ssh_args+=(-p "$port")
+fi
+
+if [[ -n "$identity" ]]; then
+    ssh_args+=(-i "$identity")
+fi
+
+if [[ -n "$username" ]]; then
+    [[ "$host" != *@* ]] ||
+        die "do not combine -u USER with USER@HOST"
+    target="${username}@${host}"
+else
+    target="$host"
+fi
+
+remote_command="
+if ! command -v screen >/dev/null 2>&1; then
+    printf '%s\n' \
+        'GNU Screen is not installed on this host.' \
+        'On Debian/Ubuntu: sudo apt install screen' >&2
+    exit 127
+fi
+
+exec env TERM=$term_type screen -D -RR -S $session
+"
+
+while :; do
+    printf 'Connecting to %s — Screen session: %s\n' "$target" "$session"
+
+    # Setting TERM locally makes SSH advertise xterm-256color when it
+    # allocates the remote pseudo-terminal. The remote command sets it again.
+    env TERM="$term_type" \
+        ssh "${ssh_args[@]}" "$target" "$remote_command"
+
+    status=$?
+
+    case "$status" in
+        0)
+            # Screen was intentionally detached or its shell was exited.
+            printf 'Workspace detached or ended.\n'
+            exit 0
+            ;;
+
+        127)
+            # Screen is missing on the remote host.
+            exit 127
+            ;;
+
+        255)
+            # SSH uses 255 for transport, connection, and authentication errors.
+            if [[ "$reconnect" -eq 0 ]]; then
+                exit 255
+            fi
+
+            printf '\nSSH connection lost. Reconnecting in 2 seconds; press Ctrl-C to stop.\n'
+            sleep 2
+            ;;
+
+        *)
+            printf '\nRemote command exited with status %d; not reconnecting.\n' \
+                "$status" >&2
+            exit "$status"
+            ;;
+    esac
+done
