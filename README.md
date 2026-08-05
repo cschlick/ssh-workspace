@@ -45,9 +45,10 @@ Select a number, or type a session name [1]:
 Passing `-s NAME` skips the picker; non-interactive runs (no terminal) use
 the default name `workspace`.
 
-Each connection remembers where it went: run `ssh-workspace` with no host at
-all and it reconnects straight to the last workspace (host, session, port,
-and `-o` options included). Explicit flags override the saved values.
+Each successful connection remembers where it went: run `ssh-workspace` with
+no host at all and it reconnects straight to the last workspace (host,
+session, port, and `-o` options included). Explicit flags override the saved
+values; failed connection attempts never overwrite the saved workspace.
 
 | Option | Description |
 | ------ | ----------- |

@@ -381,8 +381,6 @@ if [[ "$session_given" -eq 0 && "$resuming" -eq 0 && -t 0 && -t 1 ]]; then
     pick_session
 fi
 
-save_state
-
 # tmux: -A attaches if the session exists (else creates it); with -A,
 # -D detaches other clients. screen -D -RR does the same.
 remote_command="
@@ -424,6 +422,7 @@ while :; do
     case "$status" in
         0)
             # The session was intentionally detached or its shell was exited.
+            save_state
             printf 'Workspace detached or ended.\n'
             exit 0
             ;;
@@ -440,8 +439,10 @@ while :; do
             fi
 
             # A session that stayed up for a while was a real connection
-            # that dropped; restart the retry sequence from scratch.
+            # that dropped; remember it and restart the retry sequence
+            # from scratch. Failed connects never overwrite saved state.
             if [[ "$duration" -ge 30 ]]; then
+                save_state
                 retry_delay=2
                 fast_failures=0
             fi
