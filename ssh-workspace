@@ -9,6 +9,7 @@ port=""
 identity=""
 term_type="xterm-256color"
 reconnect=1
+mode="auto"
 
 ssh_args=(
     -tt
@@ -26,7 +27,9 @@ Usage:
 
 Options:
   -u USER       SSH username
-  -s SESSION    Screen session name (default: workspace)
+  -s SESSION    Session name (default: workspace)
+  -m MODE       Multiplexer: auto, tmux, or screen (default: auto —
+                use tmux if the remote host has it, else GNU Screen)
   -p PORT       SSH port (default: SSH config or 22)
   -i FILE       SSH identity file
   -o OPTION     Additional SSH option; may be repeated
@@ -49,10 +52,11 @@ die() {
     exit 2
 }
 
-while getopts ":u:s:p:i:o:e:nh" option; do
+while getopts ":u:s:m:p:i:o:e:nh" option; do
     case "$option" in
         u) username="$OPTARG" ;;
         s) session="$OPTARG" ;;
+        m) mode="$OPTARG" ;;
         p) port="$OPTARG" ;;
         i) identity="$OPTARG" ;;
         o) ssh_args+=(-o "$OPTARG") ;;
@@ -80,12 +84,24 @@ shift $((OPTIND - 1))
 
 host="$1"
 
+case "$mode" in
+    auto|tmux|screen) ;;
+    *)
+        die "invalid mode: $mode (use auto, tmux, or screen)"
+        ;;
+esac
+
 # Restrict values embedded in the remote shell command to safe characters.
 case "$session" in
     ""|*[!A-Za-z0-9_.-]*)
         die "session name may contain only letters, numbers, dots, underscores, and hyphens"
         ;;
 esac
+
+# tmux reserves dots in session names for its window.pane target syntax.
+if [[ "$mode" != screen && "$session" == *.* ]]; then
+    die "session names with dots only work with -m screen"
+fi
 
 case "$term_type" in
     ""|*[!A-Za-z0-9_.+-]*)
@@ -114,15 +130,36 @@ else
     target="$host"
 fi
 
+try_tmux=false
+try_screen=false
+case "$mode" in
+    auto)
+        try_tmux=true
+        try_screen=true
+        ;;
+    tmux)
+        try_tmux=true
+        ;;
+    screen)
+        try_screen=true
+        ;;
+esac
+
+# tmux: -A attaches if the session exists (else creates it); with -A,
+# -D detaches other clients. screen -D -RR does the same.
 remote_command="
-if ! command -v screen >/dev/null 2>&1; then
-    printf '%s\n' \
-        'GNU Screen is not installed on this host.' \
-        'On Debian/Ubuntu: sudo apt install screen' >&2
-    exit 127
+if $try_tmux && command -v tmux >/dev/null 2>&1; then
+    exec env TERM=$term_type tmux new-session -A -D -s $session
 fi
 
-exec env TERM=$term_type screen -D -RR -S $session
+if $try_screen && command -v screen >/dev/null 2>&1; then
+    exec env TERM=$term_type screen -D -RR -S $session
+fi
+
+printf '%s\n' \
+    'No usable terminal multiplexer on this host (mode: $mode).' \
+    'On Debian/Ubuntu: sudo apt install tmux (or: sudo apt install screen)' >&2
+exit 127
 "
 
 retry_delay=2
@@ -131,7 +168,7 @@ fast_failures=0
 max_fast_failures=3
 
 while :; do
-    printf 'Connecting to %s — Screen session: %s\n' "$target" "$session"
+    printf 'Connecting to %s — session: %s\n' "$target" "$session"
 
     # Setting TERM locally makes SSH advertise xterm-256color when it
     # allocates the remote pseudo-terminal. The remote command sets it again.
@@ -144,13 +181,13 @@ while :; do
 
     case "$status" in
         0)
-            # Screen was intentionally detached or its shell was exited.
+            # The session was intentionally detached or its shell was exited.
             printf 'Workspace detached or ended.\n'
             exit 0
             ;;
 
         127)
-            # Screen is missing on the remote host.
+            # No multiplexer on the remote host.
             exit 127
             ;;
 

@@ -1,8 +1,10 @@
 # ssh-workspace
 
-SSH into a host and attach to a persistent [GNU Screen](https://www.gnu.org/software/screen/)
-session in one command. If the connection drops, it reconnects automatically and
-your session picks up exactly where it left off.
+SSH into a host and attach to a persistent terminal-multiplexer session in one
+command — [tmux](https://github.com/tmux/tmux) if the remote host has it,
+[GNU Screen](https://www.gnu.org/software/screen/) otherwise. If the connection
+drops, it reconnects automatically and your session picks up exactly where it
+left off.
 
 Useful for long-running work on remote machines — builds, training runs,
 interactive sessions — where a flaky network or a closed laptop lid shouldn't
@@ -18,8 +20,8 @@ curl -fsSL https://raw.githubusercontent.com/cschlick/ssh-workspace/main/ssh-wor
 chmod +x ~/.local/bin/ssh-workspace
 ```
 
-Requirements: `bash` and `ssh` locally, GNU Screen on the remote host
-(`sudo apt install screen` on Debian/Ubuntu).
+Requirements: `bash` and `ssh` locally, tmux or GNU Screen on the remote host
+(`sudo apt install tmux` or `sudo apt install screen` on Debian/Ubuntu).
 
 ## Usage
 
@@ -31,7 +33,8 @@ ssh-workspace [options] USER@HOST
 | Option | Description |
 | ------ | ----------- |
 | `-u USER` | SSH username |
-| `-s SESSION` | Screen session name (default: `workspace`) |
+| `-s SESSION` | Session name (default: `workspace`) |
+| `-m MODE` | Multiplexer: `auto`, `tmux`, or `screen` (default: `auto` — tmux if available, else Screen) |
 | `-p PORT` | SSH port (default: SSH config or 22) |
 | `-i FILE` | SSH identity file |
 | `-o OPTION` | Additional SSH option; may be repeated |
@@ -45,15 +48,17 @@ Examples:
 ssh-workspace picomol                          # attach to "workspace" on picomol
 ssh-workspace root@picomol                     # as root
 ssh-workspace -s claude root@picomol           # separate named session
+ssh-workspace -m screen picomol                # force GNU Screen
 ssh-workspace -p 2222 -s admin alice@example.com
 ssh-workspace -o ProxyJump=bastion root@internal-server
 ```
 
 Running the same command from another machine steals the session
-(`screen -D -RR`), so you can walk from desktop to laptop and reattach to the
-same shell.
+(`tmux new-session -A -D` / `screen -D -RR`), so you can walk from desktop to
+laptop and reattach to the same shell.
 
-Detach with `Ctrl-A d`, or exit the remote shell to end the session.
+Detach with `Ctrl-B d` (tmux) or `Ctrl-A d` (Screen), or exit the remote shell
+to end the session.
 
 ## Reconnect behavior
 
