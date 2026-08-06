@@ -35,12 +35,22 @@ ssh_args=(
     -o ConnectionAttempts=1
 )
 
+mkdir -p "$state_dir" 2>/dev/null
+chmod 700 "$state_dir" 2>/dev/null
+
 # Share one SSH connection between the session listing and the attach,
-# so the picker costs no extra round-trip or auth prompt.
-if mkdir -p "$state_dir" 2>/dev/null && chmod 700 "$state_dir" 2>/dev/null; then
+# so the picker costs no extra round-trip or auth prompt. The sockets
+# need a short path: unix sockets cap at ~104 characters and ssh
+# appends a 17-character suffix to ControlPath, so a home-directory
+# path can silently be too long. /tmp is short everywhere; verify the
+# per-user directory is really ours before trusting it.
+sock_dir="/tmp/ssh-workspace-$(id -u)"
+if { mkdir -m 700 "$sock_dir" 2>/dev/null || [[ -d "$sock_dir" ]]; } &&
+    [[ ! -L "$sock_dir" && -d "$sock_dir" && -O "$sock_dir" ]] &&
+    chmod 700 "$sock_dir" 2>/dev/null; then
     ssh_args+=(
         -o ControlMaster=auto
-        -o "ControlPath=$state_dir/cm-%C"
+        -o "ControlPath=$sock_dir/cm-%C"
         -o ControlPersist=30
     )
 fi

@@ -125,6 +125,15 @@ check "user -o options precede defaults (first value wins)" "$ordered"
 grep -q 'ControlMaster=auto' "$tmp/a"
 check "connection sharing enabled" $?
 
+# Unix sockets cap at ~104 chars; %C expands to a 40-char hash and ssh
+# appends a 17-char temporary suffix when creating the socket.
+cp_path=$(grep 'ControlPath=' "$tmp/a")
+cp_path=${cp_path#ControlPath=}
+cp_path=${cp_path/\%C/0123456789012345678901234567890123456789}
+fits=1
+[[ -n "$cp_path" && $(( ${#cp_path} + 17 )) -le 104 ]] && fits=0
+check "control socket path fits the unix-socket limit" "$fits"
+
 # --- listing --------------------------------------------------------
 
 out=$("$sw" -l testhost)

@@ -146,8 +146,9 @@ to end the session.
 Quality-of-life details: the terminal tab is titled `host:session` so multiple
 workspaces are easy to tell apart, and the session listing and attach share
 one SSH connection (`ControlMaster`), so the picker adds no extra auth prompt.
-State (the last-workspace file and control sockets) lives in
-`~/.local/state/ssh-workspace/`.
+The last-workspace file lives in `~/.local/state/ssh-workspace/`; control
+sockets live in `/tmp/ssh-workspace-<uid>/`, which is kept short because
+unix socket paths cap at ~104 characters.
 
 ## Reconnect behavior
 
