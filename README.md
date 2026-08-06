@@ -14,16 +14,71 @@ kill your shell.
 
 ## Install
 
-Copy the script somewhere on your `PATH` and make it executable:
+The script itself is the whole tool — put it on your `PATH` and make it
+executable. It needs only `bash` (the stock macOS 3.2 works) and `ssh`
+locally; **remote hosts** need tmux or GNU Screen (`sudo apt install tmux`
+on Debian/Ubuntu).
+
+### macOS
 
 ```sh
+mkdir -p ~/.local/bin
 curl -fsSL https://raw.githubusercontent.com/cschlick/ssh-workspace/main/ssh-workspace \
     -o ~/.local/bin/ssh-workspace
 chmod +x ~/.local/bin/ssh-workspace
 ```
 
-Requirements: `bash` and `ssh` locally, tmux or GNU Screen on the remote host
-(`sudo apt install tmux` or `sudo apt install screen` on Debian/Ubuntu).
+If `~/.local/bin` isn't already on your `PATH`:
+
+```sh
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+```
+
+Optional — a short `ws` alias and tab completion for zsh (the macOS default
+shell):
+
+```sh
+mkdir -p ~/.zsh/completions
+curl -fsSL https://raw.githubusercontent.com/cschlick/ssh-workspace/main/completions/_ssh-workspace \
+    -o ~/.zsh/completions/_ssh-workspace
+cat >> ~/.zshrc <<'EOF'
+alias ws=ssh-workspace
+fpath=(~/.zsh/completions $fpath)
+autoload -Uz compinit && compinit
+EOF
+```
+
+(If your `~/.zshrc` already runs `compinit`, add the `fpath` line above it
+instead of repeating `compinit`.)
+
+### Linux
+
+```sh
+mkdir -p ~/.local/bin
+curl -fsSL https://raw.githubusercontent.com/cschlick/ssh-workspace/main/ssh-workspace \
+    -o ~/.local/bin/ssh-workspace
+chmod +x ~/.local/bin/ssh-workspace
+```
+
+`~/.local/bin` is on the default `PATH` in most distributions; if not, add
+the same `export PATH` line to `~/.bashrc`.
+
+Optional — `ws` alias and bash tab completion:
+
+```sh
+mkdir -p ~/.local/share/bash-completion/completions
+curl -fsSL https://raw.githubusercontent.com/cschlick/ssh-workspace/main/completions/ssh-workspace.bash \
+    -o ~/.local/share/bash-completion/completions/ssh-workspace
+echo 'alias ws=ssh-workspace' >> ~/.bashrc
+```
+
+(The `bash-completion` package auto-loads that directory. Without it,
+`source` the file from `~/.bashrc` instead. On Linux with zsh, follow the
+macOS zsh steps.)
+
+Completion covers option flags, `-m` modes, and host names from
+`~/.ssh/config`; it applies to the `ws` alias too, since shells expand
+aliases before completing.
 
 ## Usage
 
@@ -110,20 +165,6 @@ Pass `-n` to disable reconnecting entirely.
 The terminal bell rings when a reconnect succeeds and when retries pause for
 input, so a backgrounded tab gets a badge when your workspace comes back or
 needs attention.
-
-## Shell completion
-
-Completion files for bash and zsh live in [`completions/`](completions/):
-
-```sh
-# bash — add to ~/.bashrc:
-. /path/to/completions/ssh-workspace.bash
-
-# zsh — copy onto your $fpath:
-cp completions/_ssh-workspace /usr/local/share/zsh/site-functions/
-```
-
-Both complete option flags, modes, and host names from `~/.ssh/config`.
 
 ## Compared to mosh
 
