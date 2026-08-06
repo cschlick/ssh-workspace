@@ -198,6 +198,20 @@ if command -v script >/dev/null 2>&1; then
     run_pty '\n' env OUT="$tmp/o" "$sw" pickhost >/dev/null
     grep -q -- '-s workspace$' "$tmp/o"
     check "picker: Enter picks the first session" $?
+
+    cp "$sw" "$tmp/install/ssh-workspace"
+    run_pty 'n\n' env SSH_WORKSPACE_UPDATE_URL="file://$tmp/payload" \
+        "$tmp/install/ssh-workspace" -U >/dev/null
+    if grep -q '# updated marker' "$tmp/install/ssh-workspace"; then
+        check "-U interactive: 'n' cancels the update" 1
+    else
+        check "-U interactive: 'n' cancels the update" 0
+    fi
+
+    run_pty 'y\n' env SSH_WORKSPACE_UPDATE_URL="file://$tmp/payload" \
+        "$tmp/install/ssh-workspace" -U >/dev/null
+    grep -q '# updated marker' "$tmp/install/ssh-workspace"
+    check "-U interactive: 'y' installs the update" $?
 else
     printf 'skip picker tests: script(1) not available\n'
 fi

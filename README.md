@@ -113,7 +113,7 @@ values; failed connection attempts never overwrite the saved workspace.
 | `-u USER` | SSH username |
 | `-s SESSION` | Session name; skips the interactive picker |
 | `-l` | List workspaces on the host and exit |
-| `-U` | Self-update: replace this script with the latest from GitHub and exit |
+| `-U` | Self-update: fetch the latest from GitHub, show the source URL and destination path, and replace this script after confirmation |
 | `-m MODE` | Multiplexer: `auto`, `tmux`, or `screen` (default: `auto` — tmux if available, else Screen) |
 | `-p PORT` | SSH port (default: SSH config or 22) |
 | `-i FILE` | SSH identity file |

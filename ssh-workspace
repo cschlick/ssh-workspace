@@ -109,7 +109,7 @@ load_state() {
 # one and swapped in with mv, which is atomic and safe to do while
 # this copy is still executing.
 self_update() {
-    local self dir tmp first_line
+    local self dir tmp first_line reply
 
     self=$0
     if [[ "$self" != */* ]]; then
@@ -145,6 +145,20 @@ self_update() {
     if cmp -s "$tmp" "$self"; then
         printf 'Already up to date.\n'
         exit 0
+    fi
+
+    printf 'Update source: %s\n' "$update_url"
+    printf 'Will replace:  %s\n' "$self"
+    if [[ -t 0 && -t 1 ]]; then
+        printf 'Proceed? [y/N] '
+        read -r reply
+        case "$reply" in
+            y|Y|yes|Yes|YES) ;;
+            *)
+                printf 'Update cancelled.\n'
+                exit 0
+                ;;
+        esac
     fi
 
     if ! chmod +x "$tmp" || ! mv "$tmp" "$self"; then
