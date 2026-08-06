@@ -17,7 +17,8 @@ kill your shell.
 The script itself is the whole tool — put it on your `PATH` and make it
 executable. It needs only `bash` (the stock macOS 3.2 works) and `ssh`
 locally; **remote hosts** need tmux or GNU Screen (`sudo apt install tmux`
-on Debian/Ubuntu).
+on Debian/Ubuntu). Once installed, `ssh-workspace -U` updates it in place
+from GitHub.
 
 ### macOS
 
@@ -112,6 +113,7 @@ values; failed connection attempts never overwrite the saved workspace.
 | `-u USER` | SSH username |
 | `-s SESSION` | Session name; skips the interactive picker |
 | `-l` | List workspaces on the host and exit |
+| `-U` | Self-update: replace this script with the latest from GitHub and exit |
 | `-m MODE` | Multiplexer: `auto`, `tmux`, or `screen` (default: `auto` — tmux if available, else Screen) |
 | `-p PORT` | SSH port (default: SSH config or 22) |
 | `-i FILE` | SSH identity file |

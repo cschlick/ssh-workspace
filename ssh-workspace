@@ -13,7 +13,10 @@ mode="auto"
 start_command=""
 session_given=0
 list_only=0
+do_update=0
 resuming=0
+
+update_url="${SSH_WORKSPACE_UPDATE_URL:-https://raw.githubusercontent.com/cschlick/ssh-workspace/main/ssh-workspace}"
 picked_mux=""
 
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/ssh-workspace"
@@ -101,6 +104,58 @@ load_state() {
     fi
 }
 
+# Replace this script, at whatever path it is installed, with the
+# latest version from GitHub. The new file is written next to the old
+# one and swapped in with mv, which is atomic and safe to do while
+# this copy is still executing.
+self_update() {
+    local self dir tmp first_line
+
+    self=$0
+    if [[ "$self" != */* ]]; then
+        self=$(command -v -- "$self") ||
+            die "cannot determine my own location"
+    fi
+    dir=$(cd "$(dirname "$self")" && pwd) ||
+        die "cannot resolve directory of $self"
+    self="$dir/$(basename "$self")"
+
+    [[ -w "$dir" && -w "$self" ]] ||
+        die "no write permission on $self"
+
+    tmp=$(mktemp "$dir/.ssh-workspace-update.XXXXXX") ||
+        die "cannot create a temporary file in $dir"
+    trap 'rm -f "$tmp"' EXIT
+
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$update_url" -o "$tmp"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO "$tmp" "$update_url"
+    else
+        die "updating needs curl or wget"
+    fi || die "download failed: $update_url"
+
+    # Refuse to install anything that is not a runnable bash script.
+    read -r first_line < "$tmp" || :
+    if [[ ! -s "$tmp" || "$first_line" != '#!'*bash* ]] ||
+        ! bash -n "$tmp" 2>/dev/null; then
+        die "downloaded file does not look like this script; not installing"
+    fi
+
+    if cmp -s "$tmp" "$self"; then
+        printf 'Already up to date.\n'
+        exit 0
+    fi
+
+    if ! chmod +x "$tmp" || ! mv "$tmp" "$self"; then
+        die "failed to install update over $self"
+    fi
+
+    trap - EXIT
+    printf 'Updated %s.\n' "$self"
+    exit 0
+}
+
 usage() {
     cat <<USAGE
 Usage:
@@ -115,6 +170,7 @@ Options:
   -u USER       SSH username
   -s SESSION    Session name; skips the interactive picker
   -l            List workspaces on HOST and exit
+  -U            Replace this script with the latest from GitHub and exit
   -m MODE       Multiplexer: auto, tmux, or screen (default: auto —
                 use tmux if the remote host has it, else GNU Screen)
   -p PORT       SSH port (default: SSH config or 22)
@@ -142,7 +198,7 @@ die() {
     exit 2
 }
 
-while getopts ":u:s:m:p:i:o:e:c:lnh" option; do
+while getopts ":u:s:m:p:i:o:e:c:lnUh" option; do
     case "$option" in
         u) username="$OPTARG" ;;
         s)
@@ -155,6 +211,7 @@ while getopts ":u:s:m:p:i:o:e:c:lnh" option; do
         o) extra_opts+=(-o "$OPTARG") ;;
         c) start_command="$OPTARG" ;;
         l) list_only=1 ;;
+        U) do_update=1 ;;
         e) term_type="$OPTARG" ;;
         n) reconnect=0 ;;
         h)
@@ -171,6 +228,10 @@ while getopts ":u:s:m:p:i:o:e:c:lnh" option; do
 done
 
 shift $((OPTIND - 1))
+
+if [[ "$do_update" -eq 1 ]]; then
+    self_update
+fi
 
 case $# in
     0)

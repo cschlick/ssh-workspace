@@ -157,6 +157,33 @@ env FLAKY="$tmp/flaky" OUT="$tmp/o" "$sw" -s r rhost </dev/null >/dev/null
 grep -q "printf '\\\\a' >&2" "$tmp/o"
 check "reconnect attempts ring the bell on re-attach" $?
 
+# --- self-update ----------------------------------------------------
+
+mkdir -p "$tmp/install"
+cp "$sw" "$tmp/install/ssh-workspace"
+chmod +x "$tmp/install/ssh-workspace"
+{ cat "$sw"; printf '# updated marker\n'; } > "$tmp/payload"
+
+env SSH_WORKSPACE_UPDATE_URL="file://$tmp/payload" \
+    "$tmp/install/ssh-workspace" -U >/dev/null
+grep -q '# updated marker' "$tmp/install/ssh-workspace" &&
+    [[ -x "$tmp/install/ssh-workspace" ]]
+check "-U replaces the installed script" $?
+
+out=$(env SSH_WORKSPACE_UPDATE_URL="file://$tmp/payload" \
+    "$tmp/install/ssh-workspace" -U)
+uptodate=1
+[[ "$out" == 'Already up to date.' ]] && uptodate=0
+check "-U detects an up-to-date install" "$uptodate"
+
+printf 'not a script\n' > "$tmp/garbage"
+env SSH_WORKSPACE_UPDATE_URL="file://$tmp/garbage" \
+    "$tmp/install/ssh-workspace" -U 2>/dev/null
+status=$?
+grep -q '# updated marker' "$tmp/install/ssh-workspace" &&
+    [[ "$status" -eq 2 ]]
+check "-U rejects a bad download and keeps the current script" $?
+
 # --- interactive picker (needs a pty) -------------------------------
 
 if command -v script >/dev/null 2>&1; then
